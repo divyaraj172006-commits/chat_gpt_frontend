@@ -4,17 +4,17 @@ import { useNavigate } from 'react-router-dom';
 const Dashboard = () => {
     const [user, setUser] = useState(null);
     const [error, setError] = useState('');
-    
+
     // --- STATE MANAGEMENT ---
     const [messages, setMessages] = useState([]);       // Current active chat view
     const [sessions, setSessions] = useState([]);       // Sidebar List
     const [searchQuery, setSearchQuery] = useState(''); // Search Filter State
-    const [activeSessionId, setActiveSessionId] = useState(null); 
-    const [menuOpenId, setMenuOpenId] = useState(null); 
-    
+    const [activeSessionId, setActiveSessionId] = useState(null);
+    const [menuOpenId, setMenuOpenId] = useState(null);
+
     const [inputValue, setInputValue] = useState('');
     const [isSending, setIsSending] = useState(false);
-    
+
     const messagesEndRef = useRef(null);
     const menuRef = useRef(null);
     const navigate = useNavigate();
@@ -32,33 +32,55 @@ const Dashboard = () => {
                 if (response.ok) {
                     const data = await response.json();
                     setUser(data);
+                    fetchSessions(token); // Load sessions after user is confirmed
                 } else {
-                    handleLogout(); 
+                    handleLogout();
                 }
-            } catch (err) { 
-                console.error(err); 
-                setError('Failed to load data'); 
+            } catch (err) {
+                console.error(err);
+                setError('Failed to load data');
             }
         };
         fetchUserData();
     }, [navigate]);
 
-    // 2. LOAD HISTORY
-    useEffect(() => {
-        if (user && user.email) {
-            const savedSessions = localStorage.getItem(`nova_sessions_${user.email}`);
-            if (savedSessions) {
-                setSessions(JSON.parse(savedSessions));
+    // 2. FETCH SESSIONS FROM BACKEND
+    const fetchSessions = async (token = localStorage.getItem('accessToken')) => {
+        try {
+            const response = await fetch('http://127.0.0.1:8000/chats', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setSessions(data);
             }
+        } catch (error) {
+            console.error("Failed to fetch sessions:", error);
         }
-    }, [user]);
+    };
 
-    // 3. SAVE HISTORY
-    useEffect(() => {
-        if (user && user.email) {
-            localStorage.setItem(`nova_sessions_${user.email}`, JSON.stringify(sessions));
+    // 3. LOAD CHAT MESSAGES
+    const loadSession = async (sessionId) => {
+        const token = localStorage.getItem('accessToken');
+        setActiveSessionId(sessionId);
+        try {
+            // Optimistic update from local state if available, but better to fetch fresh
+            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/messages`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                // Map backend messages to UI format
+                const formattedMessages = data.map(msg => ({
+                    role: msg.role,
+                    text: msg.content
+                }));
+                setMessages(formattedMessages);
+            }
+        } catch (error) {
+            console.error("Failed to load messages:", error);
         }
-    }, [sessions, user]);
+    };
 
     // 4. AUTO SCROLL
     useEffect(() => {
@@ -82,7 +104,7 @@ const Dashboard = () => {
     const getUsername = () => {
         if (!user || !user.email) return 'User';
         const name = user.email.split('@')[0];
-        return name.charAt(0).toUpperCase() + name.slice(1); 
+        return name.charAt(0).toUpperCase() + name.slice(1);
     };
 
     const getUserInitial = () => {
@@ -94,16 +116,16 @@ const Dashboard = () => {
     const filteredSessions = sessions
         .filter(session => session.title.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
-            if (a.isPinned === b.isPinned) return b.id - a.id; 
-            return a.isPinned ? -1 : 1; 
+            if (a.is_pinned === b.is_pinned) return new Date(b.created_at) - new Date(a.created_at);
+            return a.is_pinned ? -1 : 1;
         });
 
     // --- LOGOUT ---
     const handleLogout = () => {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
-        setMessages([]); 
-        setSessions([]); 
+        setMessages([]);
+        setSessions([]);
         setActiveSessionId(null);
         setMenuOpenId(null);
         setSearchQuery('');
@@ -113,43 +135,49 @@ const Dashboard = () => {
 
     // --- NEW CHAT ---
     const handleNewChat = () => {
-        setMessages([]); 
-        setActiveSessionId(null); 
+        setMessages([]);
+        setActiveSessionId(null);
         setMenuOpenId(null);
         setSearchQuery('');
     };
 
-    // --- LOAD CHAT ---
-    const loadSession = (sessionId) => {
-        const sessionToLoad = sessions.find(s => s.id === sessionId);
-        if (sessionToLoad) {
-            setMessages(sessionToLoad.messages);
-            setActiveSessionId(sessionId);
-        }
-    };
-
     // --- DELETE CHAT SESSION ---
-    const handleDeleteSession = (e, sessionId) => {
-        e.stopPropagation(); 
-        const updatedSessions = sessions.filter(s => s.id !== sessionId);
-        setSessions(updatedSessions);
-        setMenuOpenId(null); 
-        if (activeSessionId === sessionId) {
-            setMessages([]);
-            setActiveSessionId(null);
+    const handleDeleteSession = async (e, sessionId) => {
+        e.stopPropagation();
+        const token = localStorage.getItem('accessToken');
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                setSessions(prev => prev.filter(s => s.id !== sessionId));
+                if (activeSessionId === sessionId) {
+                    handleNewChat();
+                }
+            }
+        } catch (error) {
+            console.error("Failed to delete session:", error);
         }
+        setMenuOpenId(null);
     };
 
     // --- PIN CHAT SESSION ---
-    const handlePinSession = (e, sessionId) => {
+    const handlePinSession = async (e, sessionId) => {
         e.stopPropagation();
-        setSessions(prevSessions => 
-            prevSessions.map(session => 
-                session.id === sessionId 
-                    ? { ...session, isPinned: !session.isPinned } 
-                    : session
-            )
-        );
+        const token = localStorage.getItem('accessToken');
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/pin`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const updatedSession = await response.json();
+                setSessions(prev => prev.map(s => s.id === sessionId ? updatedSession : s));
+            }
+        } catch (error) {
+            console.error("Failed to pin session:", error);
+        }
         setMenuOpenId(null);
     };
 
@@ -164,37 +192,54 @@ const Dashboard = () => {
         if (!inputValue.trim()) return;
 
         const userText = inputValue;
-        setInputValue(''); 
+        setInputValue('');
+        const token = localStorage.getItem('accessToken');
 
+        // Optimistic UI update
         const userMessage = { role: 'user', text: userText };
         setMessages(prev => [...prev, userMessage]);
         setIsSending(true);
 
         try {
-            const response = await fetch('http://127.0.0.1:8000/ask', {
+            let sessionId = activeSessionId;
+
+            // If no active session, create one first
+            if (!sessionId) {
+                const createResponse = await fetch('http://127.0.0.1:8000/chats', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!createResponse.ok) throw new Error("Failed to create session");
+                const newSession = await createResponse.json();
+                sessionId = newSession.id;
+                setActiveSessionId(sessionId);
+                // Add to sidebar immediately
+                setSessions(prev => [newSession, ...prev]);
+            }
+
+            // Send message to the session
+            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/messages`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    message: userText,
-                    system_prompt: "You are a helpful AI assistant." 
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    content: userText,
+                    role: "user" // Required by schema
                 }),
             });
 
             if (!response.ok) throw new Error("Server Error");
             const data = await response.json();
 
-            const aiMessage = { role: 'ai', text: data.response };
+            // data is the AI message response object
+            const aiMessage = { role: 'ai', text: data.content };
             setMessages(prev => [...prev, aiMessage]);
 
-            const newHistoryItem = {
-                id: Date.now(), 
-                title: userText, 
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                messages: [userMessage, aiMessage],
-                isPinned: false 
-            };
-
-            setSessions(prev => [newHistoryItem, ...prev]);
+            // Refresh sessions to update title/last message time if needed
+            // For now, let's just re-fetch sessions to keep it synced or manually update if we care about title
+            fetchSessions(token);
 
         } catch (error) {
             console.error(error);
@@ -208,9 +253,14 @@ const Dashboard = () => {
         if (e.key === 'Enter') handleSend();
     };
 
+    // Format Date helper
+    const formatTime = (dateString) => {
+        return new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
     return (
         <div className="flex h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-purple-950 text-gray-100 font-sans">
-            
+
             {/* SIDEBAR */}
             <aside className="w-[260px] bg-black/20 backdrop-blur-lg flex flex-col hidden md:flex border-r border-white/5">
                 <div className="p-4">
@@ -243,43 +293,43 @@ const Dashboard = () => {
                     <div className="flex flex-col gap-2">
                         {filteredSessions.length > 0 ? (
                             filteredSessions.map((session) => (
-                                <div 
-                                    key={session.id} 
+                                <div
+                                    key={session.id}
                                     onClick={() => loadSession(session.id)}
                                     className={`group relative flex items-center gap-3 px-3 py-3 text-sm rounded-xl transition cursor-pointer ${activeSessionId === session.id ? 'bg-white/10 text-white shadow-inner' : 'text-gray-300 hover:bg-white/5'}`}
                                 >
                                     <span className={`text-gray-500 transition ${activeSessionId === session.id ? 'text-indigo-400' : 'group-hover:text-indigo-400'}`}>
-                                        {session.isPinned ? '📌' : '💬'}
+                                        {session.is_pinned ? '📌' : '💬'}
                                     </span>
-                                    
-                                    <div className="flex flex-col overflow-hidden w-full mr-6"> 
+
+                                    <div className="flex flex-col overflow-hidden w-full mr-6">
                                         <span className="truncate font-medium flex items-center gap-1">
                                             {session.title}
                                         </span>
-                                        <span className="text-[10px] text-gray-600 group-hover:text-gray-400">{session.time}</span>
+                                        <span className="text-[10px] text-gray-600 group-hover:text-gray-400">{formatTime(session.created_at)}</span>
                                     </div>
 
                                     {/* MENU DOTS BUTTON */}
-                                    <button 
+                                    <button
                                         onClick={(e) => toggleMenu(e, session.id)}
                                         className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-all ${menuOpenId === session.id ? 'opacity-100 bg-white/10 text-white' : 'opacity-0 group-hover:opacity-100'}`}
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                            <path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
+                                            <path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z" />
                                         </svg>
                                     </button>
 
                                     {/* DROPDOWN MENU */}
                                     {menuOpenId === session.id && (
                                         <div className="absolute right-0 top-full mt-1 w-32 bg-slate-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden backdrop-blur-md">
-                                            <button 
+                                            <button
                                                 onClick={(e) => handlePinSession(e, session.id)}
                                                 className="w-full text-left px-4 py-2 text-xs text-gray-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
                                             >
-                                                <span>{session.isPinned ? 'Unpin' : 'Pin'}</span>
+                                                <span>{session.is_pinned ? 'Unpin' : 'Pin'}</span>
                                             </button>
                                             <div className="border-t border-white/5"></div>
-                                            <button 
+                                            <button
                                                 onClick={(e) => handleDeleteSession(e, session.id)}
                                                 className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2"
                                             >
@@ -296,13 +346,13 @@ const Dashboard = () => {
                         )}
                     </div>
                 </div>
-                
+
                 {/* Footer removed: User profile moved to top header */}
             </aside>
 
             {/* MAIN CONTENT */}
             <main className="flex-1 flex flex-col relative bg-slate-900/50">
-                
+
                 {/* --- NEW DASHBOARD HEADER --- */}
                 <header className="flex items-center justify-between px-6 py-4 bg-slate-900/80 backdrop-blur-md border-b border-white/5 sticky top-0 z-10">
                     <div className="flex items-center gap-4">
@@ -328,9 +378,9 @@ const Dashboard = () => {
                                 </div>
                             </div>
                         )}
-                        
-                        <button 
-                            onClick={handleLogout} 
+
+                        <button
+                            onClick={handleLogout}
                             className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-all"
                             title="Logout"
                         >
@@ -371,11 +421,10 @@ const Dashboard = () => {
                         <div className="flex flex-col space-y-6 pb-4">
                             {messages.map((msg, index) => (
                                 <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-[80%] p-4 rounded-2xl ${
-                                        msg.role === 'user' 
-                                            ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none shadow-lg shadow-purple-500/20' 
+                                    <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === 'user'
+                                            ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none shadow-lg shadow-purple-500/20'
                                             : 'bg-white/10 border border-white/10 text-gray-100 rounded-bl-none backdrop-blur-md'
-                                    }`}>
+                                        }`}>
                                         <div className="flex items-center gap-2 mb-1 opacity-50 text-xs uppercase font-bold tracking-wider">
                                             {msg.role === 'user' ? 'You' : 'Nova'}
                                         </div>
@@ -399,8 +448,8 @@ const Dashboard = () => {
                 <div className="w-full p-4 md:p-6 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent">
                     <div className="max-w-3xl mx-auto relative group">
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
-                        <input 
-                            type="text" 
+                        <input
+                            type="text"
                             placeholder={isSending ? "Processing..." : "Ask Nova..."}
                             disabled={isSending}
                             value={inputValue}
@@ -408,7 +457,7 @@ const Dashboard = () => {
                             onKeyDown={handleKeyDown}
                             className="relative w-full bg-slate-900/90 text-white rounded-2xl shadow-2xl border border-white/10 pl-5 pr-14 py-4 focus:outline-none focus:border-purple-500/50 placeholder-gray-500 transition-all disabled:opacity-50"
                         />
-                        <button 
+                        <button
                             onClick={handleSend}
                             disabled={isSending}
                             className={`absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl text-white hover:shadow-lg hover:shadow-purple-500/30 transition-all duration-200 hover:scale-105 active:scale-95 ${isSending ? 'opacity-50 cursor-not-allowed' : ''}`}>
