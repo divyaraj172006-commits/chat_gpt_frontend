@@ -6,24 +6,18 @@ const Dashboard = () => {
     const [error, setError] = useState('');
     
     // --- STATE MANAGEMENT ---
-    const [messages, setMessages] = useState([]);      // Main Chat Messages
-    const [history, setHistory] = useState([           // Sidebar History (Default items)
-        { id: 1, text: 'Welcome to NovaDash', time: 'Just now' }
-    ]);
+    const [messages, setMessages] = useState([]);       // Current active chat view
+    const [sessions, setSessions] = useState([]);       // Sidebar List
+    const [searchQuery, setSearchQuery] = useState(''); // Search Filter State
+    const [activeSessionId, setActiveSessionId] = useState(null); 
+    
     const [inputValue, setInputValue] = useState('');
     const [isSending, setIsSending] = useState(false);
     
     const messagesEndRef = useRef(null);
     const navigate = useNavigate();
 
-    // Stats Data
-    const stats = [
-        { label: 'Total Projects', value: '12 Active', icon: '🚀', style: 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20' },
-        { label: 'Pending Tasks', value: '5 Urgent', icon: '⚡', style: 'border-pink-500/30 bg-pink-500/10 text-pink-300 hover:bg-pink-500/20' },
-        { label: 'Unread Messages', value: '9 New', icon: '💬', style: 'border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20' },
-        { label: 'Total Revenue', value: '$12,450', icon: '💰', style: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' },
-    ];
-
+    // 1. FETCH USER DETAILS
     useEffect(() => {
         const fetchUserData = async () => {
             const token = localStorage.getItem('accessToken');
@@ -37,42 +31,87 @@ const Dashboard = () => {
                     const data = await response.json();
                     setUser(data);
                 } else {
-                    setError('Session expired.'); handleLogout();
+                    handleLogout(); 
                 }
-            } catch (err) { console.error(err); setError('Failed to load data'); }
+            } catch (err) { 
+                console.error(err); 
+                setError('Failed to load data'); 
+            }
         };
         fetchUserData();
     }, [navigate]);
 
+    // 2. LOAD HISTORY
+    useEffect(() => {
+        if (user && user.email) {
+            const savedSessions = localStorage.getItem(`nova_sessions_${user.email}`);
+            if (savedSessions) {
+                setSessions(JSON.parse(savedSessions));
+            }
+        }
+    }, [user]);
+
+    // 3. SAVE HISTORY
+    useEffect(() => {
+        if (user && user.email) {
+            localStorage.setItem(`nova_sessions_${user.email}`, JSON.stringify(sessions));
+        }
+    }, [sessions, user]);
+
+    // 4. AUTO SCROLL
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    // --- HELPER: GET USERNAME ---
+    const getUsername = () => {
+        if (!user || !user.email) return 'User';
+        const name = user.email.split('@')[0];
+        return name.charAt(0).toUpperCase() + name.slice(1); // Capitalize first letter
+    };
+
+    // --- FILTER SESSIONS ---
+    const filteredSessions = sessions.filter(session => 
+        session.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    // --- LOGOUT ---
     const handleLogout = () => {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
+        setMessages([]); 
+        setSessions([]); 
+        setActiveSessionId(null);
+        setSearchQuery('');
+        setUser(null);
         navigate('/login');
     };
 
-    // --- SEND FUNCTION ---
+    // --- NEW CHAT ---
+    const handleNewChat = () => {
+        setMessages([]); 
+        setActiveSessionId(null); 
+        setSearchQuery('');
+    };
+
+    // --- LOAD CHAT ---
+    const loadSession = (sessionId) => {
+        const sessionToLoad = sessions.find(s => s.id === sessionId);
+        if (sessionToLoad) {
+            setMessages(sessionToLoad.messages);
+            setActiveSessionId(sessionId);
+        }
+    };
+
+    // --- SEND MESSAGE ---
     const handleSend = async () => {
         if (!inputValue.trim()) return;
 
         const userText = inputValue;
-        setInputValue(''); // Clear input immediately
-        
-        // 1. Add User Message to Chat
+        setInputValue(''); 
+
         const userMessage = { role: 'user', text: userText };
         setMessages(prev => [...prev, userMessage]);
-
-        // 2. Add to Sidebar History
-        const newHistoryItem = { 
-            id: Date.now(), 
-            text: userText, 
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-        };
-        setHistory(prev => [newHistoryItem, ...prev]); // Add to TOP of list
-
         setIsSending(true);
 
         try {
@@ -86,12 +125,19 @@ const Dashboard = () => {
             });
 
             if (!response.ok) throw new Error("Server Error");
-
             const data = await response.json();
 
-            // 3. Add AI Response to Chat
             const aiMessage = { role: 'ai', text: data.response };
             setMessages(prev => [...prev, aiMessage]);
+
+            const newHistoryItem = {
+                id: Date.now(), 
+                title: userText, 
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                messages: [userMessage, aiMessage]
+            };
+
+            setSessions(prev => [newHistoryItem, ...prev]);
 
         } catch (error) {
             console.error(error);
@@ -111,26 +157,52 @@ const Dashboard = () => {
             {/* SIDEBAR */}
             <aside className="w-[260px] bg-black/20 backdrop-blur-lg flex flex-col hidden md:flex border-r border-white/5">
                 <div className="p-3">
-                    {/* New Chat Button: Clears the view but keeps history */}
-                    <button onClick={() => setMessages([])} className="flex items-center gap-3 w-full px-3 py-3 rounded-xl border border-indigo-500/50 hover:bg-indigo-500/20 transition text-sm text-left text-indigo-200 font-semibold group">
+                    {/* New Chat Button */}
+                    <button onClick={handleNewChat} className="flex items-center gap-3 w-full px-3 py-3 rounded-xl border border-indigo-500/50 hover:bg-indigo-500/20 transition text-sm text-left text-indigo-200 font-semibold group mb-3">
                         <span className="text-xl group-hover:rotate-90 transition duration-300">+</span>
                         New Chat
                     </button>
+
+                    {/* SEARCH BAR */}
+                    <div className="relative group">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <svg className="h-4 w-4 text-gray-500 group-focus-within:text-indigo-400 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </div>
+                        <input
+                            type="text"
+                            className="block w-full pl-10 pr-3 py-2 border border-white/10 rounded-lg leading-5 bg-slate-900/50 text-gray-300 placeholder-gray-500 focus:outline-none focus:bg-slate-900 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 sm:text-xs transition duration-150 ease-in-out"
+                            placeholder="Search chats..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
                 </div>
 
-                {/* --- DYNAMIC HISTORY LIST --- */}
+                {/* --- HISTORY LIST --- */}
                 <div className="flex-1 overflow-y-auto px-3 py-2 scrollbar-thin scrollbar-thumb-gray-700">
-                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">Recent Activity</div>
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">History</div>
                     <div className="flex flex-col gap-2">
-                        {history.map((item) => (
-                            <button key={item.id} className="flex items-center gap-3 px-3 py-3 text-sm text-gray-300 hover:bg-white/5 hover:text-white rounded-xl transition group overflow-hidden text-left">
-                                <span className="text-gray-500 group-hover:text-indigo-400 transition">💬</span>
-                                <div className="flex flex-col overflow-hidden w-full">
-                                    <span className="truncate font-medium">{item.text}</span>
-                                    <span className="text-[10px] text-gray-600 group-hover:text-gray-400">{item.time}</span>
-                                </div>
-                            </button>
-                        ))}
+                        {filteredSessions.length > 0 ? (
+                            filteredSessions.map((session) => (
+                                <button 
+                                    key={session.id} 
+                                    onClick={() => loadSession(session.id)}
+                                    className={`flex items-center gap-3 px-3 py-3 text-sm rounded-xl transition group overflow-hidden text-left ${activeSessionId === session.id ? 'bg-white/10 text-white shadow-inner' : 'text-gray-300 hover:bg-white/5'}`}
+                                >
+                                    <span className={`text-gray-500 transition ${activeSessionId === session.id ? 'text-indigo-400' : 'group-hover:text-indigo-400'}`}>💬</span>
+                                    <div className="flex flex-col overflow-hidden w-full">
+                                        <span className="truncate font-medium">{session.title}</span>
+                                        <span className="text-[10px] text-gray-600 group-hover:text-gray-400">{session.time}</span>
+                                    </div>
+                                </button>
+                            ))
+                        ) : (
+                            <div className="text-center text-gray-600 text-xs py-4">
+                                {searchQuery ? 'No chats found' : 'No history yet'}
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -148,35 +220,37 @@ const Dashboard = () => {
 
             {/* MAIN CONTENT */}
             <main className="flex-1 flex flex-col relative">
+                {/* MOBILE HEADER */}
                 <header className="md:hidden flex items-center justify-between p-4 border-b border-white/5 bg-slate-900/50 backdrop-blur-md">
-                    <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">NovaDash</span>
+                    <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">Nova</span>
                     <button onClick={handleLogout} className="text-sm text-red-400">Logout</button>
                 </header>
 
                 <div className="flex-1 flex flex-col p-4 overflow-y-auto w-full max-w-5xl mx-auto">
                     
                     {messages.length === 0 ? (
-                        // EMPTY STATE
-                        <div className="flex flex-col items-center justify-center h-full space-y-12">
+                        // WELCOME PAGE (EMPTY STATE)
+                        <div className="flex flex-col items-center justify-center h-full space-y-8">
                             <div className="text-center">
-                                <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-purple-500/30 animate-pulse">
-                                    <span className="text-4xl">🛸</span>
+                                {/* LOGO */}
+                                <div className="w-24 h-24 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-3xl mx-auto mb-8 flex items-center justify-center shadow-2xl shadow-purple-500/40 animate-pulse">
+                                    <span className="text-5xl">🛸</span>
                                 </div>
-                                <h1 className="text-5xl font-extrabold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400">
-                                    NovaDash
+                                
+                                {/* STYLIZED GREETING */}
+                                <h2 className="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight">
+                                    <span className="text-gray-200">Hi, </span>
+                                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-yellow-400">
+                                        {getUsername()}
+                                    </span>
+                                    <span className="ml-2 animate-bounce inline-block">👋</span>
+                                    <span className="ml-2 text-red-500 drop-shadow-lg">❤️</span>
+                                </h2>
+
+                                <h1 className="text-6xl md:text-7xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-indigo-400 tracking-tighter drop-shadow-2xl">
+                                    NOVA
                                 </h1>
-                                <p className="text-gray-400 text-lg">Your command center for everything.</p>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-3xl">
-                                {stats.map((stat, index) => (
-                                    <button key={index} className={`flex flex-col items-start p-5 border rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-xl ${stat.style} backdrop-blur-sm text-left`}>
-                                        <div className="flex items-center justify-between w-full mb-3">
-                                            <span className="text-3xl bg-white/10 p-2 rounded-lg">{stat.icon}</span>
-                                            <span className="text-xs font-bold opacity-70 uppercase tracking-widest">{stat.label}</span>
-                                        </div>
-                                        <span className="text-2xl font-bold text-white mb-1">{stat.value}</span>
-                                    </button>
-                                ))}
+                                <p className="text-gray-400 text-lg md:text-xl font-light">Your intelligent AI companion.</p>
                             </div>
                         </div>
                     ) : (
@@ -190,7 +264,7 @@ const Dashboard = () => {
                                             : 'bg-white/10 border border-white/10 text-gray-100 rounded-bl-none backdrop-blur-md'
                                     }`}>
                                         <div className="flex items-center gap-2 mb-1 opacity-50 text-xs uppercase font-bold tracking-wider">
-                                            {msg.role === 'user' ? 'You' : 'Nova AI'}
+                                            {msg.role === 'user' ? 'You' : 'Nova'}
                                         </div>
                                         <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                                     </div>
@@ -214,7 +288,7 @@ const Dashboard = () => {
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
                         <input 
                             type="text" 
-                            placeholder={isSending ? "Processing..." : "Ask NovaDash to analyze your data..."}
+                            placeholder={isSending ? "Processing..." : "Ask Nova..."}
                             disabled={isSending}
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
