@@ -10,11 +10,13 @@ const Dashboard = () => {
     const [sessions, setSessions] = useState([]);       // Sidebar List
     const [searchQuery, setSearchQuery] = useState(''); // Search Filter State
     const [activeSessionId, setActiveSessionId] = useState(null); 
+    const [menuOpenId, setMenuOpenId] = useState(null); 
     
     const [inputValue, setInputValue] = useState('');
     const [isSending, setIsSending] = useState(false);
     
     const messagesEndRef = useRef(null);
+    const menuRef = useRef(null);
     const navigate = useNavigate();
 
     // 1. FETCH USER DETAILS
@@ -63,17 +65,38 @@ const Dashboard = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    // 5. CLICK OUTSIDE MENU
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (menuRef.current && !menuRef.current.contains(event.target)) {
+                setMenuOpenId(null);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, []);
+
     // --- HELPER: GET USERNAME ---
     const getUsername = () => {
         if (!user || !user.email) return 'User';
         const name = user.email.split('@')[0];
-        return name.charAt(0).toUpperCase() + name.slice(1); // Capitalize first letter
+        return name.charAt(0).toUpperCase() + name.slice(1); 
     };
 
-    // --- FILTER SESSIONS ---
-    const filteredSessions = sessions.filter(session => 
-        session.title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const getUserInitial = () => {
+        if (!user || !user.email) return 'U';
+        return user.email[0].toUpperCase();
+    };
+
+    // --- FILTER & SORT SESSIONS ---
+    const filteredSessions = sessions
+        .filter(session => session.title.toLowerCase().includes(searchQuery.toLowerCase()))
+        .sort((a, b) => {
+            if (a.isPinned === b.isPinned) return b.id - a.id; 
+            return a.isPinned ? -1 : 1; 
+        });
 
     // --- LOGOUT ---
     const handleLogout = () => {
@@ -82,6 +105,7 @@ const Dashboard = () => {
         setMessages([]); 
         setSessions([]); 
         setActiveSessionId(null);
+        setMenuOpenId(null);
         setSearchQuery('');
         setUser(null);
         navigate('/login');
@@ -91,6 +115,7 @@ const Dashboard = () => {
     const handleNewChat = () => {
         setMessages([]); 
         setActiveSessionId(null); 
+        setMenuOpenId(null);
         setSearchQuery('');
     };
 
@@ -101,6 +126,37 @@ const Dashboard = () => {
             setMessages(sessionToLoad.messages);
             setActiveSessionId(sessionId);
         }
+    };
+
+    // --- DELETE CHAT SESSION ---
+    const handleDeleteSession = (e, sessionId) => {
+        e.stopPropagation(); 
+        const updatedSessions = sessions.filter(s => s.id !== sessionId);
+        setSessions(updatedSessions);
+        setMenuOpenId(null); 
+        if (activeSessionId === sessionId) {
+            setMessages([]);
+            setActiveSessionId(null);
+        }
+    };
+
+    // --- PIN CHAT SESSION ---
+    const handlePinSession = (e, sessionId) => {
+        e.stopPropagation();
+        setSessions(prevSessions => 
+            prevSessions.map(session => 
+                session.id === sessionId 
+                    ? { ...session, isPinned: !session.isPinned } 
+                    : session
+            )
+        );
+        setMenuOpenId(null);
+    };
+
+    // --- TOGGLE MENU ---
+    const toggleMenu = (e, sessionId) => {
+        e.stopPropagation();
+        setMenuOpenId(menuOpenId === sessionId ? null : sessionId);
     };
 
     // --- SEND MESSAGE ---
@@ -134,7 +190,8 @@ const Dashboard = () => {
                 id: Date.now(), 
                 title: userText, 
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                messages: [userMessage, aiMessage]
+                messages: [userMessage, aiMessage],
+                isPinned: false 
             };
 
             setSessions(prev => [newHistoryItem, ...prev]);
@@ -156,9 +213,9 @@ const Dashboard = () => {
             
             {/* SIDEBAR */}
             <aside className="w-[260px] bg-black/20 backdrop-blur-lg flex flex-col hidden md:flex border-r border-white/5">
-                <div className="p-3">
+                <div className="p-4">
                     {/* New Chat Button */}
-                    <button onClick={handleNewChat} className="flex items-center gap-3 w-full px-3 py-3 rounded-xl border border-indigo-500/50 hover:bg-indigo-500/20 transition text-sm text-left text-indigo-200 font-semibold group mb-3">
+                    <button onClick={handleNewChat} className="flex items-center gap-3 w-full px-3 py-3 rounded-xl border border-indigo-500/50 hover:bg-indigo-500/20 transition text-sm text-left text-indigo-200 font-semibold group mb-4 shadow-lg shadow-indigo-500/10">
                         <span className="text-xl group-hover:rotate-90 transition duration-300">+</span>
                         New Chat
                     </button>
@@ -172,7 +229,7 @@ const Dashboard = () => {
                         </div>
                         <input
                             type="text"
-                            className="block w-full pl-10 pr-3 py-2 border border-white/10 rounded-lg leading-5 bg-slate-900/50 text-gray-300 placeholder-gray-500 focus:outline-none focus:bg-slate-900 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 sm:text-xs transition duration-150 ease-in-out"
+                            className="block w-full pl-10 pr-3 py-2.5 border border-white/10 rounded-lg leading-5 bg-slate-900/50 text-gray-300 placeholder-gray-500 focus:outline-none focus:bg-slate-900 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 sm:text-xs transition duration-150 ease-in-out"
                             placeholder="Search chats..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
@@ -181,22 +238,56 @@ const Dashboard = () => {
                 </div>
 
                 {/* --- HISTORY LIST --- */}
-                <div className="flex-1 overflow-y-auto px-3 py-2 scrollbar-thin scrollbar-thumb-gray-700">
+                <div className="flex-1 overflow-y-auto px-3 py-2 scrollbar-thin scrollbar-thumb-gray-700" ref={menuRef}>
                     <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">History</div>
                     <div className="flex flex-col gap-2">
                         {filteredSessions.length > 0 ? (
                             filteredSessions.map((session) => (
-                                <button 
+                                <div 
                                     key={session.id} 
                                     onClick={() => loadSession(session.id)}
-                                    className={`flex items-center gap-3 px-3 py-3 text-sm rounded-xl transition group overflow-hidden text-left ${activeSessionId === session.id ? 'bg-white/10 text-white shadow-inner' : 'text-gray-300 hover:bg-white/5'}`}
+                                    className={`group relative flex items-center gap-3 px-3 py-3 text-sm rounded-xl transition cursor-pointer ${activeSessionId === session.id ? 'bg-white/10 text-white shadow-inner' : 'text-gray-300 hover:bg-white/5'}`}
                                 >
-                                    <span className={`text-gray-500 transition ${activeSessionId === session.id ? 'text-indigo-400' : 'group-hover:text-indigo-400'}`}>💬</span>
-                                    <div className="flex flex-col overflow-hidden w-full">
-                                        <span className="truncate font-medium">{session.title}</span>
+                                    <span className={`text-gray-500 transition ${activeSessionId === session.id ? 'text-indigo-400' : 'group-hover:text-indigo-400'}`}>
+                                        {session.isPinned ? '📌' : '💬'}
+                                    </span>
+                                    
+                                    <div className="flex flex-col overflow-hidden w-full mr-6"> 
+                                        <span className="truncate font-medium flex items-center gap-1">
+                                            {session.title}
+                                        </span>
                                         <span className="text-[10px] text-gray-600 group-hover:text-gray-400">{session.time}</span>
                                     </div>
-                                </button>
+
+                                    {/* MENU DOTS BUTTON */}
+                                    <button 
+                                        onClick={(e) => toggleMenu(e, session.id)}
+                                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-all ${menuOpenId === session.id ? 'opacity-100 bg-white/10 text-white' : 'opacity-0 group-hover:opacity-100'}`}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
+                                        </svg>
+                                    </button>
+
+                                    {/* DROPDOWN MENU */}
+                                    {menuOpenId === session.id && (
+                                        <div className="absolute right-0 top-full mt-1 w-32 bg-slate-800 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden backdrop-blur-md">
+                                            <button 
+                                                onClick={(e) => handlePinSession(e, session.id)}
+                                                className="w-full text-left px-4 py-2 text-xs text-gray-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
+                                            >
+                                                <span>{session.isPinned ? 'Unpin' : 'Pin'}</span>
+                                            </button>
+                                            <div className="border-t border-white/5"></div>
+                                            <button 
+                                                onClick={(e) => handleDeleteSession(e, session.id)}
+                                                className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2"
+                                            >
+                                                <span>Delete</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             ))
                         ) : (
                             <div className="text-center text-gray-600 text-xs py-4">
@@ -205,39 +296,61 @@ const Dashboard = () => {
                         )}
                     </div>
                 </div>
-
-                <div className="border-t border-white/5 p-3 bg-black/10">
-                    {user && (
-                        <div className="flex items-center gap-3 px-3 py-3 hover:bg-white/5 rounded-xl cursor-pointer transition group" onClick={handleLogout}>
-                            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-purple-500/20">
-                                {user.email[0].toUpperCase()}
-                            </div>
-                            <div className="flex-1 text-sm font-medium truncate text-gray-200 group-hover:text-white">{user.email}</div>
-                        </div>
-                    )}
-                </div>
+                
+                {/* Footer removed: User profile moved to top header */}
             </aside>
 
             {/* MAIN CONTENT */}
-            <main className="flex-1 flex flex-col relative">
-                {/* MOBILE HEADER */}
-                <header className="md:hidden flex items-center justify-between p-4 border-b border-white/5 bg-slate-900/50 backdrop-blur-md">
-                    <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">Nova</span>
-                    <button onClick={handleLogout} className="text-sm text-red-400">Logout</button>
+            <main className="flex-1 flex flex-col relative bg-slate-900/50">
+                
+                {/* --- NEW DASHBOARD HEADER --- */}
+                <header className="flex items-center justify-between px-6 py-4 bg-slate-900/80 backdrop-blur-md border-b border-white/5 sticky top-0 z-10">
+                    <div className="flex items-center gap-4">
+                        {/* Mobile Logo (Visible only on small screens) */}
+                        <div className="md:hidden font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 text-xl">
+                            Nova
+                        </div>
+                        {/* Desktop Context Title */}
+                        <h2 className="hidden md:block text-lg font-semibold text-gray-200">
+                            {activeSessionId ? 'Chat Session' : 'Dashboard'}
+                        </h2>
+                    </div>
+
+                    {/* RIGHT SIDE: User Profile & Actions */}
+                    <div className="flex items-center gap-4">
+                        {user && (
+                            <div className="flex items-center gap-3 pl-3 pr-1 py-1 bg-white/5 rounded-full border border-white/5 hover:bg-white/10 transition group cursor-default">
+                                <span className="text-sm font-medium text-gray-200 group-hover:text-white transition">
+                                    {getUsername()}
+                                </span>
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-purple-500/20">
+                                    {getUserInitial()}
+                                </div>
+                            </div>
+                        )}
+                        
+                        <button 
+                            onClick={handleLogout} 
+                            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-all"
+                            title="Logout"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                <polyline points="16 17 21 12 16 7"></polyline>
+                                <line x1="21" y1="12" x2="9" y2="12"></line>
+                            </svg>
+                        </button>
+                    </div>
                 </header>
 
-                <div className="flex-1 flex flex-col p-4 overflow-y-auto w-full max-w-5xl mx-auto">
-                    
+                <div className="flex-1 flex flex-col p-4 overflow-y-auto w-full max-w-5xl mx-auto scrollbar-hide">
                     {messages.length === 0 ? (
-                        // WELCOME PAGE (EMPTY STATE)
+                        // WELCOME PAGE
                         <div className="flex flex-col items-center justify-center h-full space-y-8">
                             <div className="text-center">
-                                {/* LOGO */}
                                 <div className="w-24 h-24 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-3xl mx-auto mb-8 flex items-center justify-center shadow-2xl shadow-purple-500/40 animate-pulse">
                                     <span className="text-5xl">🛸</span>
                                 </div>
-                                
-                                {/* STYLIZED GREETING */}
                                 <h2 className="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight">
                                     <span className="text-gray-200">Hi, </span>
                                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-yellow-400">
