@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom'; // 1. Import this
 
+const API_BASE = import.meta.env.VITE_API_BASE;
+
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  
+
   const navigate = useNavigate(); // 2. Initialize the hook
 
   const handleSubmit = async (e) => {
@@ -15,7 +17,7 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/login', {
+      const response = await fetch(`${API_BASE}/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -32,9 +34,9 @@ const Login = () => {
         localStorage.setItem('tokenType', data.token_type);
 
         console.log('Login successful!');
-        
+
         // 3. THIS IS THE MISSING PART: Redirect to Dashboard
-        navigate('/dashboard'); 
+        navigate('/dashboard');
       } else {
         setError(data.detail || 'Login failed.');
       }
@@ -58,7 +60,7 @@ const Login = () => {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-xl border border-gray-100 sm:rounded-2xl sm:px-10">
-          
+
           {error && (
             <div className="mb-4 p-3 rounded bg-red-50 text-red-600 text-sm border border-red-200">
               {error}

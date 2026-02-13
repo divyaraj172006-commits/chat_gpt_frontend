@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+const API_BASE = import.meta.env.VITE_API_BASE;
+
 const Dashboard = () => {
     const [user, setUser] = useState(null);
     const [error, setError] = useState('');
@@ -25,7 +27,7 @@ const Dashboard = () => {
             const token = localStorage.getItem('accessToken');
             if (!token) { navigate('/login'); return; }
             try {
-                const response = await fetch('http://127.0.0.1:8000/users/me', {
+                const response = await fetch(`${API_BASE}/users/me`, {
                     method: 'GET',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 });
@@ -47,7 +49,7 @@ const Dashboard = () => {
     // 2. FETCH SESSIONS FROM BACKEND
     const fetchSessions = async (token = localStorage.getItem('accessToken')) => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/chats', {
+            const response = await fetch(`${API_BASE}/chats`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
@@ -65,7 +67,7 @@ const Dashboard = () => {
         setActiveSessionId(sessionId);
         try {
             // Optimistic update from local state if available, but better to fetch fresh
-            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/messages`, {
+            const response = await fetch(`${API_BASE}/chats/${sessionId}/messages`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
@@ -146,7 +148,7 @@ const Dashboard = () => {
         e.stopPropagation();
         const token = localStorage.getItem('accessToken');
         try {
-            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}`, {
+            const response = await fetch(`${API_BASE}/chats/${sessionId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -167,7 +169,7 @@ const Dashboard = () => {
         e.stopPropagation();
         const token = localStorage.getItem('accessToken');
         try {
-            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/pin`, {
+            const response = await fetch(`${API_BASE}/chats/${sessionId}/pin`, {
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -205,7 +207,7 @@ const Dashboard = () => {
 
             // If no active session, create one first
             if (!sessionId) {
-                const createResponse = await fetch('http://127.0.0.1:8000/chats', {
+                const createResponse = await fetch(`${API_BASE}/chats`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
@@ -218,7 +220,7 @@ const Dashboard = () => {
             }
 
             // Send message to the session
-            const response = await fetch(`http://127.0.0.1:8000/chats/${sessionId}/messages`, {
+            const response = await fetch(`${API_BASE}/chats/${sessionId}/messages`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -407,7 +409,7 @@ const Dashboard = () => {
                                         {getUsername()}
                                     </span>
                                     <span className="ml-2 animate-bounce inline-block">👋</span>
-                                    <span className="ml-2 text-red-500 drop-shadow-lg">❤️</span>
+                                    <span className="ml-2 animate-pulse text-red-500 drop-shadow-lg">❤️</span>
                                 </h2>
 
                                 <h1 className="text-6xl md:text-7xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-indigo-400 tracking-tighter drop-shadow-2xl">
@@ -422,8 +424,8 @@ const Dashboard = () => {
                             {messages.map((msg, index) => (
                                 <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                     <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === 'user'
-                                            ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none shadow-lg shadow-purple-500/20'
-                                            : 'bg-white/10 border border-white/10 text-gray-100 rounded-bl-none backdrop-blur-md'
+                                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none shadow-lg shadow-purple-500/20'
+                                        : 'bg-white/10 border border-white/10 text-gray-100 rounded-bl-none backdrop-blur-md'
                                         }`}>
                                         <div className="flex items-center gap-2 mb-1 opacity-50 text-xs uppercase font-bold tracking-wider">
                                             {msg.role === 'user' ? 'You' : 'Nova'}
